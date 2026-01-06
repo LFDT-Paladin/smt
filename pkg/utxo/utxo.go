@@ -19,6 +19,7 @@ package utxo
 import (
 	"math/big"
 
+	"github.com/LFDT-Paladin/smt/internal/crypto/hash"
 	"github.com/LFDT-Paladin/smt/internal/utxo"
 	"github.com/LFDT-Paladin/smt/pkg/utxo/core"
 	"github.com/iden3/go-iden3-crypto/babyjub"
@@ -42,4 +43,12 @@ func NewNonFungibleNullifier(tokenId *big.Int, tokenUri string, owner *big.Int, 
 
 func HashTokenUri(tokenUri string) (*big.Int, error) {
 	return utxo.HashTokenUri(tokenUri)
+}
+
+func NewPoseidonHasher() core.Hasher {
+	return &hash.PoseidonHasher{}
+}
+
+func NewKeccak256Hasher() core.Hasher {
+	return &hash.Keccak256Hasher{}
 }
