@@ -29,10 +29,10 @@ import (
 func NewSalt() *big.Int {
 	// ensure that the salt fits inside the field of SNARKs
 	max := constants.Q
-	return newRandomNumberInRange(max)
+	return NewRandomNumberInRange(max)
 }
 
-func newRandomNumberInRange(max *big.Int) *big.Int {
+func NewRandomNumberInRange(max *big.Int) *big.Int {
 	// ensure that the salt fits inside the field of SNARKs
 	maxRounds := 10
 	var e error
