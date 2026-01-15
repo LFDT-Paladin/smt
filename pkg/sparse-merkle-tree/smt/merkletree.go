@@ -17,10 +17,12 @@
 package smt
 
 import (
+	"context"
+
 	"github.com/LFDT-Paladin/smt/internal/sparse-merkle-tree/smt"
 	"github.com/LFDT-Paladin/smt/pkg/sparse-merkle-tree/core"
 )
 
-func NewMerkleTree(db core.Storage, maxLevels int) (core.SparseMerkleTree, error) {
-	return smt.NewMerkleTree(db, maxLevels)
+func NewMerkleTree(ctx context.Context, db core.Storage, maxLevels int) (core.SparseMerkleTree, error) {
+	return smt.NewMerkleTree(ctx, db, maxLevels)
 }

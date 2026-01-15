@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"math/big"
 	"os"
 	"testing"
@@ -42,6 +43,7 @@ func (s *testSqlProvider) DB() *gorm.DB {
 func (s *testSqlProvider) Close() {}
 
 func TestSqliteStorage(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -69,9 +71,9 @@ func TestSqliteStorage(t *testing.T) {
 	assert.NoError(t, err)
 
 	idx, _ := utxo1.CalculateIndex()
-	err = s.UpsertRootNodeRef(idx)
+	err = s.UpsertRootNodeRef(ctx, idx)
 	assert.NoError(t, err)
-	dbIdx, err := s.GetRootNodeRef()
+	dbIdx, err := s.GetRootNodeRef(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, idx.Hex(), dbIdx.Hex())
 
@@ -80,7 +82,7 @@ func TestSqliteStorage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, idx.Hex(), dbRoot.RootRef)
 
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	dbNode := core.SMTNode{RefKey: n1.Ref().Hex()}
@@ -88,21 +90,22 @@ func TestSqliteStorage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), dbNode.RefKey)
 
-	n2, err := s.GetNode(n1.Ref())
+	n2, err := s.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n2.Ref().Hex())
 
 	bn1, err := node.NewBranchNode(n1.Ref(), n1.Ref(), &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
-	n3, err := s.GetNode(bn1.Ref())
+	n3, err := s.GetNode(ctx, bn1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, bn1.Ref().Hex(), n3.Ref().Hex())
 }
 
 func TestSqliteStorageFail_NoRootTable(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -115,17 +118,18 @@ func TestSqliteStorageFail_NoRootTable(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 	assert.NoError(t, err)
 
-	_, err = s.GetRootNodeRef()
+	_, err = s.GetRootNodeRef(ctx)
 	assert.EqualError(t, err, "no such table: merkelTreeRoots")
 
 	err = db.Table(core.TreeRootsTable).AutoMigrate(&core.SMTRoot{})
 	assert.NoError(t, err)
 
-	_, err = s.GetRootNodeRef()
+	_, err = s.GetRootNodeRef(ctx)
 	assert.EqualError(t, err, "key not found")
 }
 
 func TestSqliteStorageFail_NoNodeTable(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -140,17 +144,18 @@ func TestSqliteStorageFail_NoNodeTable(t *testing.T) {
 
 	idx, err := node.NewNodeIndexFromHex("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	_, err = s.GetNode(idx)
+	_, err = s.GetNode(ctx, idx)
 	assert.EqualError(t, err, "no such table: smtNodes_test_1")
 
 	err = db.Table(core.NodesTablePrefix + "test_1").AutoMigrate(&core.SMTNode{})
 	assert.NoError(t, err)
 
-	_, err = s.GetNode(idx)
+	_, err = s.GetNode(ctx, idx)
 	assert.EqualError(t, err, "key not found")
 }
 
 func TestSqliteStorageFail_BadNodeIndex(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -173,7 +178,7 @@ func TestSqliteStorageFail_BadNodeIndex(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// modify the index in the db
@@ -185,12 +190,12 @@ func TestSqliteStorageFail_BadNodeIndex(t *testing.T) {
 	err = db.Table(core.NodesTablePrefix + "test_1").Save(&dbNode).Error
 	assert.NoError(t, err)
 
-	_, err = s.GetNode(n1.Ref())
+	_, err = s.GetNode(ctx, n1.Ref())
 	assert.EqualError(t, err, "expected 32 bytes for the decoded node index")
 
 	bn1, err := node.NewBranchNode(n1.Ref(), n1.Ref(), &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
 	dbNode = core.SMTNode{RefKey: bn1.Ref().Hex()}
@@ -201,14 +206,14 @@ func TestSqliteStorageFail_BadNodeIndex(t *testing.T) {
 	err = db.Table(core.NodesTablePrefix + "test_1").Save(&dbNode).Error
 	assert.NoError(t, err)
 
-	_, err = s.GetNode(bn1.Ref())
+	_, err = s.GetNode(ctx, bn1.Ref())
 	assert.EqualError(t, err, "expected 32 bytes for the decoded node index")
 
 	dbNode.LeftChild = &saveLeftChild
 	dbNode.RightChild = &badIndex
 	err = db.Table(core.NodesTablePrefix + "test_1").Save(&dbNode).Error
 	assert.NoError(t, err)
-	_, err = s.GetNode(bn1.Ref())
+	_, err = s.GetNode(ctx, bn1.Ref())
 	assert.EqualError(t, err, "expected 32 bytes for the decoded node index")
 
 	s.Close()
@@ -226,6 +231,7 @@ func TestSqlStorage_GetHasher(t *testing.T) {
 }
 
 func TestSqlStorage_Transaction(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -242,7 +248,7 @@ func TestSqlStorage_Transaction(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// Test BeginTx
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, tx)
 
@@ -254,34 +260,35 @@ func TestSqlStorage_Transaction(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node through transaction
-	err = tx.InsertNode(n1)
+	err = tx.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Get node through transaction
-	n2, err := tx.GetNode(n1.Ref())
+	n2, err := tx.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n2.Ref().Hex())
 
 	// Upsert root through transaction
 	idx, _ := utxo1.CalculateIndex()
-	err = tx.UpsertRootNodeRef(idx)
+	err = tx.UpsertRootNodeRef(ctx, idx)
 	assert.NoError(t, err)
 
 	// Commit transaction
-	err = tx.Commit()
+	err = tx.Commit(ctx)
 	assert.NoError(t, err)
 
 	// Verify data was committed
-	n3, err := s.GetNode(n1.Ref())
+	n3, err := s.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n3.Ref().Hex())
 
-	root, err := s.GetRootNodeRef()
+	root, err := s.GetRootNodeRef(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, idx.Hex(), root.Hex())
 }
 
 func TestSqlStorage_TransactionRollback(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -298,7 +305,7 @@ func TestSqlStorage_TransactionRollback(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// Start transaction
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 
 	// Insert node through transaction
@@ -307,20 +314,21 @@ func TestSqlStorage_TransactionRollback(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
-	err = tx.InsertNode(n1)
+	err = tx.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Rollback transaction
-	err = tx.Rollback()
+	err = tx.Rollback(ctx)
 	assert.NoError(t, err)
 
 	// Verify data was not committed
-	_, err = s.GetNode(n1.Ref())
+	_, err = s.GetNode(ctx, n1.Ref())
 	assert.Error(t, err)
 	assert.Equal(t, core.ErrNotFound, err)
 }
 
 func TestSqlStorage_GetNodeWithValue(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -345,17 +353,18 @@ func TestSqlStorage_GetNodeWithValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Get node and verify value
-	n2, err := s.GetNode(n1.Ref())
+	n2, err := s.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n2.Ref().Hex())
 	assert.Equal(t, value, n2.Value())
 }
 
 func TestSqlStorage_GetNodeWithEmptyValueString(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -379,7 +388,7 @@ func TestSqlStorage_GetNodeWithEmptyValueString(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Modify the value in DB to be empty string
@@ -392,12 +401,13 @@ func TestSqlStorage_GetNodeWithEmptyValueString(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Get node - should work with nil value (empty string is treated as nil)
-	n2, err := s.GetNode(n1.Ref())
+	n2, err := s.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Nil(t, n2.Value())
 }
 
 func TestSqlStorage_GetNodeWithInvalidValue(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -422,7 +432,7 @@ func TestSqlStorage_GetNodeWithInvalidValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Modify the value in DB to be invalid hex
@@ -435,12 +445,13 @@ func TestSqlStorage_GetNodeWithInvalidValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Get node should fail with invalid value error
-	_, err = s.GetNode(n1.Ref())
+	_, err = s.GetNode(ctx, n1.Ref())
 	assert.Error(t, err)
 	assert.Equal(t, core.ErrInvalidValue, err)
 }
 
 func TestSqlStorage_GetRootNodeRef_InvalidHex(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -463,11 +474,12 @@ func TestSqlStorage_GetRootNodeRef_InvalidHex(t *testing.T) {
 	assert.NoError(t, err)
 
 	// GetRootNodeRef should fail
-	_, err = s.GetRootNodeRef()
+	_, err = s.GetRootNodeRef(ctx)
 	assert.Error(t, err)
 }
 
 func TestSqlStorage_GetRootNodeRef_WrongLength(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -490,11 +502,12 @@ func TestSqlStorage_GetRootNodeRef_WrongLength(t *testing.T) {
 	assert.NoError(t, err)
 
 	// GetRootNodeRef should fail
-	_, err = s.GetRootNodeRef()
+	_, err = s.GetRootNodeRef(ctx)
 	assert.Error(t, err)
 }
 
 func TestSqlStorage_InsertNodeWithValue(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -519,7 +532,7 @@ func TestSqlStorage_InsertNodeWithValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Verify value was stored
@@ -531,6 +544,7 @@ func TestSqlStorage_InsertNodeWithValue(t *testing.T) {
 }
 
 func TestSqlStorage_InsertNodeDuplicate(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -553,11 +567,11 @@ func TestSqlStorage_InsertNodeDuplicate(t *testing.T) {
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
 
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Insert same node again (should not error due to OnConflict DoNothing)
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Verify only one node exists
@@ -567,6 +581,7 @@ func TestSqlStorage_InsertNodeDuplicate(t *testing.T) {
 }
 
 func TestSqlStorage_TransactionGetNode(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -588,22 +603,23 @@ func TestSqlStorage_TransactionGetNode(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Start transaction and get node
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 
-	n2, err := tx.GetNode(n1.Ref())
+	n2, err := tx.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n2.Ref().Hex())
 
-	err = tx.Commit()
+	err = tx.Commit(ctx)
 	assert.NoError(t, err)
 }
 
 func TestSqlStorage_TransactionUpsertRootNodeRef(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -618,25 +634,26 @@ func TestSqlStorage_TransactionUpsertRootNodeRef(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// Start transaction
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 
 	// Upsert root through transaction
 	idx, _ := node.NewNodeIndexFromBigInt(big.NewInt(123), &hash.PoseidonHasher{})
-	err = tx.UpsertRootNodeRef(idx)
+	err = tx.UpsertRootNodeRef(ctx, idx)
 	assert.NoError(t, err)
 
 	// Commit
-	err = tx.Commit()
+	err = tx.Commit(ctx)
 	assert.NoError(t, err)
 
 	// Verify root was saved
-	root, err := s.GetRootNodeRef()
+	root, err := s.GetRootNodeRef(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, idx.Hex(), root.Hex())
 }
 
 func TestSqlStorage_GetNode_InvalidLeftChild(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -657,7 +674,7 @@ func TestSqlStorage_GetNode_InvalidLeftChild(t *testing.T) {
 	idx2, _ := node.NewNodeIndexFromBigInt(big.NewInt(2), &hash.PoseidonHasher{})
 	bn1, err := node.NewBranchNode(idx1, idx2, &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
 	// Modify left child to be invalid hex
@@ -670,11 +687,12 @@ func TestSqlStorage_GetNode_InvalidLeftChild(t *testing.T) {
 	assert.NoError(t, err)
 
 	// GetNode should fail
-	_, err = s.GetNode(bn1.Ref())
+	_, err = s.GetNode(ctx, bn1.Ref())
 	assert.Error(t, err)
 }
 
 func TestSqlStorage_GetNode_InvalidRightChild(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -695,7 +713,7 @@ func TestSqlStorage_GetNode_InvalidRightChild(t *testing.T) {
 	idx2, _ := node.NewNodeIndexFromBigInt(big.NewInt(2), &hash.PoseidonHasher{})
 	bn1, err := node.NewBranchNode(idx1, idx2, &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
 	// Modify right child to be invalid hex
@@ -708,11 +726,12 @@ func TestSqlStorage_GetNode_InvalidRightChild(t *testing.T) {
 	assert.NoError(t, err)
 
 	// GetNode should fail
-	_, err = s.GetNode(bn1.Ref())
+	_, err = s.GetNode(ctx, bn1.Ref())
 	assert.Error(t, err)
 }
 
 func TestSqlStorage_GetNode_InvalidIndexHex(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -734,7 +753,7 @@ func TestSqlStorage_GetNode_InvalidIndexHex(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Modify index to be invalid hex (not just wrong length, but invalid hex)
@@ -747,11 +766,12 @@ func TestSqlStorage_GetNode_InvalidIndexHex(t *testing.T) {
 	assert.NoError(t, err)
 
 	// GetNode should fail
-	_, err = s.GetNode(n1.Ref())
+	_, err = s.GetNode(ctx, n1.Ref())
 	assert.Error(t, err)
 }
 
 func TestSqlStorage_GetRootNodeRef_OtherError(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -765,13 +785,14 @@ func TestSqlStorage_GetRootNodeRef_OtherError(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// GetRootNodeRef should return error (table doesn't exist)
-	_, err = s.GetRootNodeRef()
+	_, err = s.GetRootNodeRef(ctx)
 	assert.Error(t, err)
 	// Should not be ErrNotFound, but a table error
 	assert.NotEqual(t, core.ErrNotFound, err)
 }
 
 func TestSqlStorage_GetNode_OtherError(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -786,7 +807,7 @@ func TestSqlStorage_GetNode_OtherError(t *testing.T) {
 
 	idx, _ := node.NewNodeIndexFromBigInt(big.NewInt(10), &hash.PoseidonHasher{})
 	// GetNode should return error (table doesn't exist)
-	_, err = s.GetNode(idx)
+	_, err = s.GetNode(ctx, idx)
 	assert.Error(t, err)
 	// Should not be ErrNotFound, but a table error
 	assert.NotEqual(t, core.ErrNotFound, err)
@@ -808,6 +829,7 @@ func TestSqlStorage_NewSqlStorage(t *testing.T) {
 // meant to be stored, so this case is not supported by the current implementation.
 
 func TestSqlStorage_GetNode_InvalidNodeType(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -829,7 +851,7 @@ func TestSqlStorage_GetNode_InvalidNodeType(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Modify the node type to be invalid
@@ -843,13 +865,14 @@ func TestSqlStorage_GetNode_InvalidNodeType(t *testing.T) {
 
 	// GetNode should return nil node and nil error (switch doesn't match any case)
 	// This is a potential bug - it should probably return an error
-	n2, _ := s.GetNode(n1.Ref())
+	n2, _ := s.GetNode(ctx, n1.Ref())
 	// The current implementation returns nil, nil for invalid node types
 	assert.Nil(t, n2)
 	// err might be nil or might be set, depending on implementation
 }
 
 func TestSqlStorage_InsertNode_NilLeftChild(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -868,16 +891,17 @@ func TestSqlStorage_InsertNode_NilLeftChild(t *testing.T) {
 	idx2, _ := node.NewNodeIndexFromBigInt(big.NewInt(2), &hash.PoseidonHasher{})
 	bn1, err := node.NewBranchNode(idx1, idx2, &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
 	// Verify it was stored correctly
-	n2, err := s.GetNode(bn1.Ref())
+	n2, err := s.GetNode(ctx, bn1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, bn1.Ref().Hex(), n2.Ref().Hex())
 }
 
 func TestSqlStorage_TransactionCommitError(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -894,20 +918,21 @@ func TestSqlStorage_TransactionCommitError(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// Start transaction
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 
 	// Commit should work normally
-	err = tx.Commit()
+	err = tx.Commit(ctx)
 	assert.NoError(t, err)
 
 	// Try to commit again (should fail)
-	err = tx.Commit()
+	err = tx.Commit(ctx)
 	// This might fail or succeed depending on GORM implementation
 	_ = err
 }
 
 func TestSqlStorage_TransactionRollbackError(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -924,19 +949,20 @@ func TestSqlStorage_TransactionRollbackError(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// Start transaction
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 
 	// Rollback should work normally
-	err = tx.Rollback()
+	err = tx.Rollback(ctx)
 	assert.NoError(t, err)
 
 	// Try to rollback again (might fail or succeed)
-	err = tx.Rollback()
+	err = tx.Rollback(ctx)
 	_ = err
 }
 
 func TestSqlStorage_UpsertRootNodeRef_UpdateExisting(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -952,26 +978,27 @@ func TestSqlStorage_UpsertRootNodeRef_UpdateExisting(t *testing.T) {
 
 	// Insert initial root
 	idx1, _ := node.NewNodeIndexFromBigInt(big.NewInt(100), &hash.PoseidonHasher{})
-	err = s.UpsertRootNodeRef(idx1)
+	err = s.UpsertRootNodeRef(ctx, idx1)
 	assert.NoError(t, err)
 
 	// Verify it was saved
-	root1, err := s.GetRootNodeRef()
+	root1, err := s.GetRootNodeRef(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, idx1.Hex(), root1.Hex())
 
 	// Update root
 	idx2, _ := node.NewNodeIndexFromBigInt(big.NewInt(200), &hash.PoseidonHasher{})
-	err = s.UpsertRootNodeRef(idx2)
+	err = s.UpsertRootNodeRef(ctx, idx2)
 	assert.NoError(t, err)
 
 	// Verify it was updated
-	root2, err := s.GetRootNodeRef()
+	root2, err := s.GetRootNodeRef(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, idx2.Hex(), root2.Hex())
 }
 
 func TestSqlStorage_GetNode_NilIndexPointer(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -991,7 +1018,7 @@ func TestSqlStorage_GetNode_NilIndexPointer(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, nil)
 	assert.NoError(t, err)
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Modify index to be nil
@@ -1004,11 +1031,12 @@ func TestSqlStorage_GetNode_NilIndexPointer(t *testing.T) {
 
 	// GetNode should panic due to nil pointer dereference
 	assert.Panics(t, func() {
-		_, _ = s.GetNode(n1.Ref())
+		_, _ = s.GetNode(ctx, n1.Ref())
 	})
 }
 
 func TestSqlStorage_GetNode_NilLeftChildPointer(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -1027,7 +1055,7 @@ func TestSqlStorage_GetNode_NilLeftChildPointer(t *testing.T) {
 	idx2, _ := node.NewNodeIndexFromBigInt(big.NewInt(2), &hash.PoseidonHasher{})
 	bn1, err := node.NewBranchNode(idx1, idx2, &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
 	// Modify left child to be nil
@@ -1040,11 +1068,12 @@ func TestSqlStorage_GetNode_NilLeftChildPointer(t *testing.T) {
 
 	// GetNode should panic due to nil pointer dereference
 	assert.Panics(t, func() {
-		_, _ = s.GetNode(bn1.Ref())
+		_, _ = s.GetNode(ctx, bn1.Ref())
 	})
 }
 
 func TestSqlStorage_GetNode_NilRightChildPointer(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -1063,7 +1092,7 @@ func TestSqlStorage_GetNode_NilRightChildPointer(t *testing.T) {
 	idx2, _ := node.NewNodeIndexFromBigInt(big.NewInt(2), &hash.PoseidonHasher{})
 	bn1, err := node.NewBranchNode(idx1, idx2, &hash.PoseidonHasher{})
 	assert.NoError(t, err)
-	err = s.InsertNode(bn1)
+	err = s.InsertNode(ctx, bn1)
 	assert.NoError(t, err)
 
 	// Modify right child to be nil
@@ -1076,11 +1105,12 @@ func TestSqlStorage_GetNode_NilRightChildPointer(t *testing.T) {
 
 	// GetNode should panic due to nil pointer dereference
 	assert.Panics(t, func() {
-		_, _ = s.GetNode(bn1.Ref())
+		_, _ = s.GetNode(ctx, bn1.Ref())
 	})
 }
 
 func TestSqlStorage_InsertNode_LeafWithValue(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -1103,7 +1133,7 @@ func TestSqlStorage_InsertNode_LeafWithValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Verify value was stored
@@ -1115,6 +1145,7 @@ func TestSqlStorage_InsertNode_LeafWithValue(t *testing.T) {
 }
 
 func TestSqlStorage_InsertNode_LeafWithoutValue(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -1136,7 +1167,7 @@ func TestSqlStorage_InsertNode_LeafWithoutValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Insert node
-	err = s.InsertNode(n1)
+	err = s.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Verify value was not stored (nil)
@@ -1157,6 +1188,7 @@ func TestSqlStorage_Close(t *testing.T) {
 }
 
 func TestSqlStorage_TransactionOperations(t *testing.T) {
+	ctx := context.Background()
 	dbfile, err := os.CreateTemp("", "gorm.db")
 	assert.NoError(t, err)
 	defer func() {
@@ -1173,7 +1205,7 @@ func TestSqlStorage_TransactionOperations(t *testing.T) {
 	s := NewSqlStorage(provider, "test_1", &hash.PoseidonHasher{})
 
 	// Test all transaction operations together
-	tx, err := s.BeginTx()
+	tx, err := s.BeginTx(ctx)
 	assert.NoError(t, err)
 
 	// Insert node
@@ -1182,28 +1214,28 @@ func TestSqlStorage_TransactionOperations(t *testing.T) {
 	utxo1 := node.NewFungible(big.NewInt(100), sender.PublicKey, salt1, &hash.PoseidonHasher{})
 	n1, err := node.NewLeafNode(utxo1, big.NewInt(999))
 	assert.NoError(t, err)
-	err = tx.InsertNode(n1)
+	err = tx.InsertNode(ctx, n1)
 	assert.NoError(t, err)
 
 	// Get node
-	n2, err := tx.GetNode(n1.Ref())
+	n2, err := tx.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n2.Ref().Hex())
 
 	// Upsert root
 	idx, _ := utxo1.CalculateIndex()
-	err = tx.UpsertRootNodeRef(idx)
+	err = tx.UpsertRootNodeRef(ctx, idx)
 	assert.NoError(t, err)
 
 	// Commit
-	err = tx.Commit()
+	err = tx.Commit(ctx)
 	assert.NoError(t, err)
 
 	// Verify everything was committed
-	n3, err := s.GetNode(n1.Ref())
+	n3, err := s.GetNode(ctx, n1.Ref())
 	assert.NoError(t, err)
 	assert.Equal(t, n1.Ref().Hex(), n3.Ref().Hex())
-	root, err := s.GetRootNodeRef()
+	root, err := s.GetRootNodeRef(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, idx.Hex(), root.Hex())
 }

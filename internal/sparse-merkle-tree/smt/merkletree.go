@@ -17,6 +17,7 @@
 package smt
 
 import (
+	"context"
 	"math/big"
 	"strconv"
 	"sync"
@@ -40,16 +41,16 @@ type sparseMerkleTree struct {
 	hasher    apicore.Hasher
 }
 
-func NewMerkleTree(db core.Storage, maxLevels int) (core.SparseMerkleTree, error) {
+func NewMerkleTree(ctx context.Context, db core.Storage, maxLevels int) (core.SparseMerkleTree, error) {
 	if maxLevels <= 0 || maxLevels > MAX_TREE_HEIGHT {
 		return nil, ErrMaxLevelsNotInRange
 	}
 	mt := sparseMerkleTree{db: db, maxLevels: maxLevels, hasher: db.GetHasher()}
 
-	root, err := mt.db.GetRootNodeRef()
+	root, err := mt.db.GetRootNodeRef(ctx)
 	if err == core.ErrNotFound {
 		mt.rootKey = node.ZERO_INDEX
-		err = mt.db.UpsertRootNodeRef(mt.rootKey)
+		err = mt.db.UpsertRootNodeRef(ctx, mt.rootKey)
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +69,7 @@ func (mt *sparseMerkleTree) Root() core.NodeRef {
 }
 
 // AddLeaf adds a new leaf node into the MerkleTree. It starts from the root node
-func (mt *sparseMerkleTree) AddLeaf(node core.Node) error {
+func (mt *sparseMerkleTree) AddLeaf(ctx context.Context, node core.Node) error {
 	mt.Lock()
 	defer mt.Unlock()
 
@@ -81,31 +82,31 @@ func (mt *sparseMerkleTree) AddLeaf(node core.Node) error {
 	// use up all the bits in the index's path. As soon as a unique path is found,
 	// which may be only the first few bits of the index, the new leaf node is added.
 	// One or more branch nodes may be created to accommodate the new leaf node.
-	batch, err := mt.db.BeginTx()
+	batch, err := mt.db.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
-	newRootKey, err := mt.addLeaf(batch, node, mt.rootKey, 0, path)
+	newRootKey, err := mt.addLeaf(ctx, batch, node, mt.rootKey, 0, path)
 	if err != nil {
 		log.L().Errorf("Error adding leaf node %s: %v, rolling back", node.Ref().Hex(), err)
-		_ = batch.Rollback()
+		_ = batch.Rollback(ctx)
 		return err
 	}
 	mt.rootKey = newRootKey
 
 	// update the root node index in the storage
 	log.L().Infof("Upserting root node index to %s", mt.rootKey.Hex())
-	err = batch.UpsertRootNodeRef(mt.rootKey)
+	err = batch.UpsertRootNodeRef(ctx, mt.rootKey)
 	if err != nil {
 		log.L().Errorf("Error upserting root node %s: %v, rolling back", mt.rootKey.Hex(), err)
-		_ = batch.Rollback()
+		_ = batch.Rollback(ctx)
 		return err
 	}
 	log.L().Infof("Committing batch operations for adding leaf node %s", node.Ref().Hex())
-	err = batch.Commit()
+	err = batch.Commit(ctx)
 	if err != nil {
 		log.L().Errorf("Error committing batch operations for adding leaf node %s: %v", node.Ref().Hex(), err)
-		err = batch.Rollback()
+		err = batch.Rollback(ctx)
 		if err != nil {
 			log.L().Errorf("Error rolling back batch operations for adding leaf node %s: %v", node.Ref().Hex(), err)
 		}
@@ -116,23 +117,23 @@ func (mt *sparseMerkleTree) AddLeaf(node core.Node) error {
 
 // GetNode gets a node by key from the merkle tree. Empty nodes are not stored in the
 // tree: they are all the same and assumed to always exist.
-func (mt *sparseMerkleTree) GetNode(key core.NodeRef) (core.Node, error) {
+func (mt *sparseMerkleTree) GetNode(ctx context.Context, key core.NodeRef) (core.Node, error) {
 	mt.RLock()
 	defer mt.RUnlock()
-	return mt.getNode(key)
+	return mt.getNode(ctx, key)
 }
 
 // GenerateProofs generates a list of proofs of existence (or non-existence) of the provided
 // leaf nodes that are represented by their indexes. An optional Merkle tree root can be provided.
 // If rootKey is not provided, the current Merkle tree root is used
-func (mt *sparseMerkleTree) GenerateProofs(keys []*big.Int, rootKey core.NodeRef) ([]core.Proof, []*big.Int, error) {
+func (mt *sparseMerkleTree) GenerateProofs(ctx context.Context, keys []*big.Int, rootKey core.NodeRef) ([]core.Proof, []*big.Int, error) {
 	mt.RLock()
 	defer mt.RUnlock()
 
 	merkleProofs := make([]core.Proof, len(keys))
 	foundValues := make([]*big.Int, len(keys))
 	for i, key := range keys {
-		proof, value, err := mt.generateProof(key, rootKey)
+		proof, value, err := mt.generateProof(ctx, key, rootKey)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -143,7 +144,7 @@ func (mt *sparseMerkleTree) GenerateProofs(keys []*big.Int, rootKey core.NodeRef
 	return merkleProofs, foundValues, nil
 }
 
-func (mt *sparseMerkleTree) generateProof(key *big.Int, rootKey core.NodeRef) (core.Proof, *big.Int, error) {
+func (mt *sparseMerkleTree) generateProof(ctx context.Context, key *big.Int, rootKey core.NodeRef) (core.Proof, *big.Int, error) {
 	p := &proof{hasher: mt.hasher}
 	var siblingKey core.NodeRef
 
@@ -157,7 +158,7 @@ func (mt *sparseMerkleTree) generateProof(key *big.Int, rootKey core.NodeRef) (c
 	}
 	nextKey := rootKey
 	for p.depth = 0; p.depth < uint(mt.maxLevels); p.depth++ {
-		n, err := mt.getNode(nextKey)
+		n, err := mt.getNode(ctx, nextKey)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -203,11 +204,11 @@ func (mt *sparseMerkleTree) generateProof(key *big.Int, rootKey core.NodeRef) (c
 }
 
 // must be called from inside a read lock
-func (mt *sparseMerkleTree) getNode(key core.NodeRef) (core.Node, error) {
+func (mt *sparseMerkleTree) getNode(ctx context.Context, key core.NodeRef) (core.Node, error) {
 	if key.IsZero() {
 		return node.NewEmptyNode(), nil
 	}
-	node, err := mt.db.GetNode(key)
+	node, err := mt.db.GetNode(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +225,7 @@ func (mt *sparseMerkleTree) getNode(key core.NodeRef) (core.Node, error) {
 //     as children of a new branch node.
 //   - if the current node is a branch node, it will continue traversing the tree, using the
 //     next bit of the new node's index to determine which child to go down to.
-func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, currentNodeRef core.NodeRef, level int, path []bool) (core.NodeRef, error) {
+func (mt *sparseMerkleTree) addLeaf(ctx context.Context, batch core.Transaction, newLeaf core.Node, currentNodeRef core.NodeRef, level int, path []bool) (core.NodeRef, error) {
 	log.WithLogField("level", strconv.Itoa(level)).Debugf("Adding leaf node %s", newLeaf.Ref().Hex())
 	if level > mt.maxLevels-1 {
 		// we have exhausted all levels but could not find a unique path for the new leaf.
@@ -234,7 +235,7 @@ func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, c
 	}
 
 	var nextKey core.NodeRef
-	currentNode, err := mt.getNode(currentNodeRef)
+	currentNode, err := mt.getNode(ctx, currentNodeRef)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +245,7 @@ func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, c
 		// index's path where the tree is empty. This means we have found
 		// the node that doesn't exist yet. We can add the new leaf node here
 		log.WithLogField("level", strconv.Itoa(level)).Debugf("Found empty slot, inserting leaf node %s", newLeaf.Ref().Hex())
-		return mt.addNode(batch, newLeaf)
+		return mt.addNode(ctx, batch, newLeaf)
 	case core.NodeTypeLeaf:
 		nIndex := currentNode.Index()
 		// Check if leaf node found contains the leaf node we are
@@ -258,14 +259,14 @@ func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, c
 		// path of the existing leaf node and the new leaf node until they diverge.
 		pathOldLeaf := nIndex.ToPath(mt.maxLevels)
 		log.WithLogField("level", strconv.Itoa(level)).Debug("Found occupied slot, extending path")
-		return mt.extendPath(batch, newLeaf, currentNode, level, path, pathOldLeaf)
+		return mt.extendPath(ctx, batch, newLeaf, currentNode, level, path, pathOldLeaf)
 	case core.NodeTypeBranch:
 		// We need to go deeper, continue traversing the tree, left or
 		// right depending on path
 		var newBranchNode core.Node
 		if path[level] { // go right
 			log.WithLogField("level", strconv.Itoa(level)).Debug("Found branch node, going right")
-			nextKey, err = mt.addLeaf(batch, newLeaf, currentNode.RightChild(), level+1, path)
+			nextKey, err = mt.addLeaf(ctx, batch, newLeaf, currentNode.RightChild(), level+1, path)
 			if err != nil {
 				return nil, err
 			}
@@ -273,7 +274,7 @@ func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, c
 			newBranchNode, err = node.NewBranchNode(currentNode.LeftChild(), nextKey, mt.hasher)
 		} else { // go left
 			log.WithLogField("level", strconv.Itoa(level)).Debug("Found branch node, going left")
-			nextKey, err = mt.addLeaf(batch, newLeaf, currentNode.LeftChild(), level+1, path)
+			nextKey, err = mt.addLeaf(ctx, batch, newLeaf, currentNode.LeftChild(), level+1, path)
 			if err != nil {
 				return nil, err
 			}
@@ -285,7 +286,7 @@ func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, c
 		}
 		// persist the updated branch node
 		log.WithLogField("level", strconv.Itoa(level)).Debugf("Inserting new branch node %s (leftChild=%s, rightChild=%s)", newBranchNode.Ref().Hex(), newBranchNode.LeftChild().Hex(), newBranchNode.RightChild().Hex())
-		return mt.addNode(batch, newBranchNode)
+		return mt.addNode(ctx, batch, newBranchNode)
 	default:
 		return nil, ErrInvalidNodeFound
 	}
@@ -294,19 +295,19 @@ func (mt *sparseMerkleTree) addLeaf(batch core.Transaction, newLeaf core.Node, c
 // must be called from inside a write lock
 // addNode adds a node into the MT.  Empty nodes are not stored in the tree;
 // they are all the same and assumed to always exist.
-func (mt *sparseMerkleTree) addNode(batch core.Transaction, n core.Node) (core.NodeRef, error) {
+func (mt *sparseMerkleTree) addNode(ctx context.Context, batch core.Transaction, n core.Node) (core.NodeRef, error) {
 	if n.Type() == core.NodeTypeEmpty {
 		return n.Ref(), nil
 	}
 	k := n.Ref()
-	err := batch.InsertNode(n)
+	err := batch.InsertNode(ctx, n)
 	return k, err
 }
 
 // must be called from inside a write lock
 // extendPath extends the path of two leaf nodes, which share the same beginnging part of
 // their indexes, until their paths diverge, creating ancestor branch nodes as needed.
-func (mt *sparseMerkleTree) extendPath(batch core.Transaction, newLeaf core.Node, oldLeaf core.Node, level int, pathNewLeaf []bool, pathOldLeaf []bool) (core.NodeRef, error) {
+func (mt *sparseMerkleTree) extendPath(ctx context.Context, batch core.Transaction, newLeaf core.Node, oldLeaf core.Node, level int, pathNewLeaf []bool, pathOldLeaf []bool) (core.NodeRef, error) {
 	if level > mt.maxLevels-2 {
 		return nil, ErrReachedMaxLevel
 	}
@@ -316,7 +317,7 @@ func (mt *sparseMerkleTree) extendPath(batch core.Transaction, newLeaf core.Node
 		// next bit of the existing leaf node's index, we need to further extend
 		// the path of both nodes.
 		log.WithLogField("level", strconv.Itoa(level)).Debug("Found occupied slot, extending path")
-		nextKey, err := mt.extendPath(batch, newLeaf, oldLeaf, level+1, pathNewLeaf, pathOldLeaf)
+		nextKey, err := mt.extendPath(ctx, batch, newLeaf, oldLeaf, level+1, pathNewLeaf, pathOldLeaf)
 		if err != nil {
 			return nil, err
 		}
@@ -332,7 +333,7 @@ func (mt *sparseMerkleTree) extendPath(batch core.Transaction, newLeaf core.Node
 		}
 		// persist the new branch node. and return the key of the new branch node
 		log.WithLogField("level", strconv.Itoa(level)).Debugf("Inserting new branch node %s (leftChild=%s, rightChild=%s)", newBranchNode.Ref().Hex(), newBranchNode.LeftChild().Hex(), newBranchNode.RightChild().Hex())
-		return mt.addNode(batch, newBranchNode)
+		return mt.addNode(ctx, batch, newBranchNode)
 	}
 
 	// at the current level, the two nodes finally diverges. We can now create a
@@ -354,7 +355,7 @@ func (mt *sparseMerkleTree) extendPath(batch core.Transaction, newLeaf core.Node
 	// We can add newLeaf to the DB now. We don't need to add oldLeaf because it's
 	// already in the DB.
 	log.WithLogField("level", strconv.Itoa(level)).Debugf("Inserting new leaf node %s", newLeaf.Ref().Hex())
-	_, err = mt.addNode(batch, newLeaf)
+	_, err = mt.addNode(ctx, batch, newLeaf)
 	if err != nil {
 		return nil, err
 	}
@@ -362,5 +363,5 @@ func (mt *sparseMerkleTree) extendPath(batch core.Transaction, newLeaf core.Node
 	// the new leaf node to the DB. We also return this new branch node's key
 	// to allow the caller to create branch nodes as needed.
 	log.WithLogField("level", strconv.Itoa(level)).Debugf("Inserting new branch node %s (leftChild=%s, rightChild=%s)", newBranchNode.Ref().Hex(), newBranchNode.LeftChild().Hex(), newBranchNode.RightChild().Hex())
-	return mt.addNode(batch, newBranchNode)
+	return mt.addNode(ctx, batch, newBranchNode)
 }
