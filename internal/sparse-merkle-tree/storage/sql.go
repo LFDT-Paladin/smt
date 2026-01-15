@@ -77,6 +77,7 @@ func (s *sqlStorage) BeginTx() (core.Transaction, error) {
 		tx:             s.p.DB().Begin(),
 		smtName:        s.smtName,
 		nodesTableName: s.nodesTableName,
+		hasher:         s.hasher,
 	}, nil
 }
 
