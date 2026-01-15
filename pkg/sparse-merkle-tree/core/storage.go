@@ -17,6 +17,8 @@
 package core
 
 import (
+	"context"
+
 	"github.com/LFDT-Paladin/smt/pkg/utxo/core"
 	"gorm.io/gorm"
 )
@@ -24,18 +26,18 @@ import (
 type Storage interface {
 	// GetRootNodeRef returns the root node index.
 	// Must return an ErrNotFound error if it does not exist.
-	GetRootNodeRef() (NodeRef, error)
+	GetRootNodeRef(context.Context) (NodeRef, error)
 	// UpsertRootNodeIndex updates the root node index.
-	UpsertRootNodeRef(NodeRef) error
+	UpsertRootNodeRef(context.Context, NodeRef) error
 	// GetNode returns the node with the given reference hash
 	// Must return an ErrNotFound error if it does not exist.
-	GetNode(NodeRef) (Node, error)
+	GetNode(context.Context, NodeRef) (Node, error)
 	// InsertNode inserts a node into the storage. Where the private values of a node are stored
 	// is implementation-specific
-	InsertNode(Node) error
+	InsertNode(context.Context, Node) error
 	// BeginTx executes a batch of operations in a single transaction. The semantics of the batch
 	// function follows the semantics of the gorm.DB.Transaction function.
-	BeginTx() (Transaction, error)
+	BeginTx(context.Context) (Transaction, error)
 	// Close closes the storage resource
 	Close()
 	// GetHasher returns the hasher used by the storage
@@ -43,11 +45,11 @@ type Storage interface {
 }
 
 type Transaction interface {
-	UpsertRootNodeRef(NodeRef) error
-	GetNode(NodeRef) (Node, error)
-	InsertNode(Node) error
-	Commit() error
-	Rollback() error
+	UpsertRootNodeRef(context.Context, NodeRef) error
+	GetNode(context.Context, NodeRef) (Node, error)
+	InsertNode(context.Context, Node) error
+	Commit(context.Context) error
+	Rollback(context.Context) error
 }
 
 const (

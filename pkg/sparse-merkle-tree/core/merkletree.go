@@ -16,7 +16,10 @@
 
 package core
 
-import "math/big"
+import (
+	"context"
+	"math/big"
+)
 
 // An append-only sparse merkle tree implementation using a pluggable
 // storage backend. Each leaf node is a key-value pair where the key is
@@ -36,12 +39,12 @@ type SparseMerkleTree interface {
 	// Root returns the root hash of the tree
 	Root() NodeRef
 	// AddLeaf adds a key-value pair to the tree
-	AddLeaf(leaf Node) error
+	AddLeaf(ctx context.Context, leaf Node) error
 	// GetNode returns the node at the given reference hash
 	// nodeRef: the reference hash of the node (node.Ref()). Note, this is NOT the index of the node
-	GetNode(nodeRef NodeRef) (Node, error)
+	GetNode(ctx context.Context, nodeRef NodeRef) (Node, error)
 	// GetnerateProof generates a proof of existence (or non-existence) of a leaf node
 	// nodeIndexes: the index of the leaf nodes to generate proofs for
 	// rootRef: the reference hash of the root node
-	GenerateProofs(nodeIndexes []*big.Int, rootRef NodeRef) ([]Proof, []*big.Int, error)
+	GenerateProofs(ctx context.Context, nodeIndexes []*big.Int, rootRef NodeRef) ([]Proof, []*big.Int, error)
 }

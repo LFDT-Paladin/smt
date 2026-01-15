@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"math/big"
 
 	"github.com/LFDT-Paladin/smt/internal/sparse-merkle-tree/node"
@@ -46,7 +47,7 @@ func NewSqlStorage(p core.SqlDBProvider, smtName string, hasher apicore.Hasher) 
 	}
 }
 
-func (s *sqlStorage) GetRootNodeRef() (core.NodeRef, error) {
+func (s *sqlStorage) GetRootNodeRef(ctx context.Context) (core.NodeRef, error) {
 	root := core.SMTRoot{
 		Name: s.smtName,
 	}
@@ -60,19 +61,19 @@ func (s *sqlStorage) GetRootNodeRef() (core.NodeRef, error) {
 	return idx, err
 }
 
-func (s *sqlStorage) UpsertRootNodeRef(root core.NodeRef) error {
+func (s *sqlStorage) UpsertRootNodeRef(ctx context.Context, root core.NodeRef) error {
 	return upsertRootNodeRef(s.p.DB(), s.smtName, root)
 }
 
-func (s *sqlStorage) GetNode(ref core.NodeRef) (core.Node, error) {
+func (s *sqlStorage) GetNode(ctx context.Context, ref core.NodeRef) (core.Node, error) {
 	return getNode(s.p.DB(), s.nodesTableName, ref, s.hasher)
 }
 
-func (s *sqlStorage) InsertNode(n core.Node) error {
+func (s *sqlStorage) InsertNode(ctx context.Context, n core.Node) error {
 	return insertNode(s.p.DB(), s.nodesTableName, n)
 }
 
-func (s *sqlStorage) BeginTx() (core.Transaction, error) {
+func (s *sqlStorage) BeginTx(ctx context.Context) (core.Transaction, error) {
 	return &sqlTxStorage{
 		tx:             s.p.DB().Begin(),
 		smtName:        s.smtName,
@@ -88,23 +89,23 @@ type sqlTxStorage struct {
 	hasher         apicore.Hasher
 }
 
-func (b *sqlTxStorage) UpsertRootNodeRef(root core.NodeRef) error {
+func (b *sqlTxStorage) UpsertRootNodeRef(ctx context.Context, root core.NodeRef) error {
 	return upsertRootNodeRef(b.tx, b.smtName, root)
 }
 
-func (b *sqlTxStorage) GetNode(ref core.NodeRef) (core.Node, error) {
+func (b *sqlTxStorage) GetNode(ctx context.Context, ref core.NodeRef) (core.Node, error) {
 	return getNode(b.tx, b.nodesTableName, ref, b.hasher)
 }
 
-func (b *sqlTxStorage) InsertNode(n core.Node) error {
+func (b *sqlTxStorage) InsertNode(ctx context.Context, n core.Node) error {
 	return insertNode(b.tx, b.nodesTableName, n)
 }
 
-func (b *sqlTxStorage) Commit() error {
+func (b *sqlTxStorage) Commit(ctx context.Context) error {
 	return b.tx.Commit().Error
 }
 
-func (b *sqlTxStorage) Rollback() error {
+func (b *sqlTxStorage) Rollback(ctx context.Context) error {
 	return b.tx.Rollback().Error
 }
 
