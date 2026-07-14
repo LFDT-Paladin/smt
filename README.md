@@ -4,7 +4,7 @@ Golang implementation of Sparse Merkle Tree that is optimized for managing leaf 
 
 ## Prerequisites
 
-This library requires Go version **1.23**.
+This library requires Go version **1.26**.
 
 ## Running the unit tests for the Spark Merkle Tree implementation
 
