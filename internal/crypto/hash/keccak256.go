@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/hyperledger/firefly-signer/pkg/abi"
+	"github.com/hyperledger-firefly/signer/pkg/abi"
 	"golang.org/x/crypto/sha3"
 )
 
